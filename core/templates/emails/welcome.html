@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
+        .content { padding: 20px; }
+        .footer { text-align: center; padding: 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Çek Fişi'e Hoş Geldiniz</h1>
+        </div>
+        <div class="content">
+            <p>Merhaba,</p>
+            <p>Mali müşaviriniz {{ accountant_name }} tarafından Çek Fişi sistemine eklendiniz.</p>
+            <p>Giriş bilgileriniz:</p>
+            <ul>
+                <li>Email: {{ email }}</li>
+                <li>Şifre: {{ password }}</li>
+            </ul>
+            <p>Güvenliğiniz için lütfen ilk girişinizde şifrenizi değiştirin.</p>
+            <p><a href="http://localhost:3000/auth/login/client">Giriş yapmak için tıklayın</a></p>
+        </div>
+        <div class="footer">
+            <p>Bu email otomatik olarak gönderilmiştir, lütfen yanıtlamayınız.</p>
+        </div>
+    </div>
+</body>
+</html> 
