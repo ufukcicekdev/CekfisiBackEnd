@@ -269,8 +269,17 @@ CACHES = {
 # CORS ayarlarını geri ekleyelim
 CORS_ALLOWED_ORIGINS = [
     "https://cekfisi.com",
-    "http://localhost:3000",  # Development için
+    "https://www.cekfisi.com",
+    "http://localhost:3000",
+    "https://cekfisibackend-production.up.railway.app"
 ]
+ 
+
+
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
+
 
 # CORS ayarlarını genişletelim
 CORS_ALLOW_CREDENTIALS = True
