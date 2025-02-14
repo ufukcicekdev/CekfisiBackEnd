@@ -9,7 +9,6 @@ from .views import (
     VerifyOTPView,
     CurrentUserView,
     register,
-    CustomTokenObtainPairView
 )
 
 router = DefaultRouter()
@@ -22,7 +21,7 @@ router.register(r'subscription-plans', views.SubscriptionPlanViewSet, basename='
 urlpatterns = [
     # Auth endpoints
     path('auth/register/', register, name='register'),
-    path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/login/', LoginView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # User endpoints - router'dan önce olmalı

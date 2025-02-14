@@ -1,0 +1,24 @@
+{% load i18n %}{% autoescape off %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Doğrulama</title>
+</head>
+<body>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h1 style="color: #2c3e50;">Çek Fişi - Email Doğrulama</h1>
+        <p>Merhaba {{ user.get_full_name }},</p>
+        <p>Çek Fişi hesabınızı doğrulamak için aşağıdaki linke tıklayın:</p>
+        <p>
+            <a href="{{ activate_url }}" style="background-color: #3498db; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+                Email Adresimi Doğrula
+            </a>
+        </p>
+        <p>Bu işlemi siz yapmadıysanız, lütfen bu emaili dikkate almayın.</p>
+        <br>
+        <p>Saygılarımızla,</p>
+        <p><strong>Çek Fişi Ekibi</strong></p>
+    </div>
+</body>
+</html>
+{% endautoescape %} 

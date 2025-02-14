@@ -70,6 +70,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -77,7 +78,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, 'templates')],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -191,6 +192,7 @@ SIMPLE_JWT = {
 
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
 MEDIA_URL = '/media/'
@@ -227,7 +229,6 @@ PAYTR_MERCHANT_ID = os.getenv('PAYTR_MERCHANT_ID')
 PAYTR_MERCHANT_KEY = os.getenv('PAYTR_MERCHANT_KEY')
 PAYTR_MERCHANT_SALT = os.getenv('PAYTR_MERCHANT_SALT')
 PAYTR_TEST_MODE = int(os.getenv('PAYTR_TEST_MODE', '1'))
-FRONTEND_URL = os.getenv('FRONTEND_URL')
 
 # DigitalOcean Spaces Configuration
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
@@ -303,13 +304,59 @@ REST_AUTH = {
     'USER_DETAILS_SERIALIZER': 'core.serializers.UserSerializer',
     'REGISTER_SERIALIZER': 'core.serializers.CustomRegisterSerializer',
     'JWT_AUTH_HTTPONLY': False,
+    'OLD_PASSWORD_FIELD_ENABLED': True,
+    'LOGOUT_ON_PASSWORD_CHANGE': False,
+    'SESSION_LOGIN': False,
 }
 
-ACCOUNT_EMAIL_VERIFICATION = 'none'
+# Allauth ayarları
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
 ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_USERNAME_REQUIRED = False  # Username'i zorunlu olmaktan çıkar
+ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Sadece email ile giriş
+ACCOUNT_CONFIRM_EMAIL_ON_GET = True
+ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 3
+ACCOUNT_EMAIL_SUBJECT_PREFIX = 'Çek Fişi - '
+
+# Tekrarlanan ayarları kaldıralım
 ACCOUNT_UNIQUE_EMAIL = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
+ACCOUNT_USER_MODEL_USERNAME_FIELD = None  # Username alanını tamamen devre dışı bırak
+
+# API ve Frontend URL'leri (en üste taşıyalım)
+API_URL = os.getenv('API_URL', 'http://localhost:8000')
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# Email ve doğrulama ayarları (tekrarları kaldıralım)
+ACCOUNT_EMAIL_VERIFICATION = 'mandatory'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_CONFIRM_EMAIL_ON_GET = True
+ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 3
+ACCOUNT_EMAIL_SUBJECT_PREFIX = 'Çek Fişi - '
+
+# Email template ayarları
+ACCOUNT_EMAIL_CONFIRMATION_TEMPLATE = 'email/email_confirmation_message.html'
+ACCOUNT_EMAIL_CONFIRMATION_SUBJECT = 'Çek Fişi - Email Doğrulama'
+
+# Email doğrulama URL'i
+ACCOUNT_EMAIL_CONFIRMATION_URL = f"{API_URL}/api/v1/auth/verify-email/{{key}}"
+
+# Allauth'un email doğrulama sistemini devre dışı bırak
+SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'
+SOCIALACCOUNT_EMAIL_REQUIRED = False
+SOCIALACCOUNT_AUTO_SIGNUP = True
+
+
+
+# Email template ayarları
+ACCOUNT_EMAIL_CONFIRMATION_TEMPLATE = 'email/email_confirmation_message.html'
+ACCOUNT_EMAIL_CONFIRMATION_SUBJECT = 'Çek Fişi - Email Doğrulama'
+
+# Frontend URL'i (email doğrulama için)
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://cekfisi.com')
+ACCOUNT_EMAIL_CONFIRMATION_URL = f"{FRONTEND_URL}/auth/verify-email/{{key}}"
+
+# URL ayarları
+APPEND_SLASH = False  # URL sonunda / zorunluluğunu kaldır
 
 
 

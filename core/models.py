@@ -28,6 +28,7 @@ class User(AbstractUser):
     
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES)
     phone = models.CharField(max_length=20, blank=True)
+    username = models.CharField(max_length=150, null=True, blank=True)
     email = models.EmailField(unique=True)
     is_active = models.BooleanField(default=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -68,44 +69,36 @@ def document_file_path(instance, filename):
     return f"documents/{instance.uploaded_by.id}/{timezone.now().strftime('%Y/%m')}/{filename}"
 
 class Document(models.Model):
-    DOCUMENT_TYPES = [
+    DOCUMENT_TYPES = (
         ('invoice', 'Fatura'),
         ('receipt', 'Fiş'),
-        ('expense', 'Gider Pusulası'),
         ('contract', 'Sözleşme'),
         ('other', 'Diğer'),
-    ]
-
-    STATUS_CHOICES = [
-        ('pending', 'Bekliyor'),
-        ('processed', 'İşlendi'),
-    ]
-
-    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='documents')
+    )
+    
+    STATUS_CHOICES = (
+        ('pending', 'Beklemede'),
+        ('processing', 'İşleniyor'),
+        ('completed', 'Tamamlandı'),
+        ('rejected', 'Reddedildi'),
+    )
+    
     document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES)
-    file = models.FileField(
-        upload_to=document_file_path,
-        storage=default_storage
-    )
+    file = models.FileField(upload_to=document_file_path)
     date = models.DateField()
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    vat_rate = models.DecimalField(max_digits=4, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    vat_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    processed_by = models.ForeignKey(
-        User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
-        related_name='processed_documents'
-    )
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_documents')
+    processed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='processed_documents')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        ordering = ['-date']
-
     def __str__(self):
-        return f"{self.document_type} - {self.date}"
+        return f"{self.get_document_type_display()} - {self.date}"
+
+    class Meta:
+        ordering = ['-created_at']
 
 class SubscriptionPlan(models.Model):
     PLAN_TYPE_CHOICES = (

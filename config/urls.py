@@ -18,10 +18,34 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from dj_rest_auth.registration.views import ResendEmailVerificationView
+from core.views import VerifyEmailView, ResendVerificationEmailView  # Kendi view'ımızı kullanacağız
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('core.urls')),
+    
+    # Email doğrulama URL'leri - sonunda / ekleyelim
+    path(
+        'api/v1/auth/verify-email/<str:key>/',  # Sonunda / var
+        VerifyEmailView.as_view(),
+        name='account_confirm_email',
+    ),
+    path(
+        'api/v1/auth/resend-email/',  # Sonunda / var
+        ResendEmailVerificationView.as_view(),
+        name="account_resend_email",
+    ),
+    path(
+        'api/v1/auth/verify-email/<str:key>/',
+        VerifyEmailView.as_view(),
+        name='account_confirm_email',
+    ),
+    path(
+        'api/v1/auth/resend-verification-email/',
+        ResendVerificationEmailView.as_view(),
+        name='resend_verification_email',
+    ),
 ]
 
 # Debug modunda static ve media dosyalarını serve et

@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from .models import User, AccountingFirm, Document, SubscriptionPlan, AccountantSubscription
+from allauth.account.models import EmailAddress, EmailConfirmation  # allauth'dan import
 from .serializers import (
     UserSerializer, 
     AccountingFirmSerializer, 
@@ -37,6 +38,8 @@ from django.core.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from django.core.cache import cache
 from rest_framework.permissions import AllowAny
+from allauth.account.views import ConfirmEmailView
+from django.http import JsonResponse
 
 # Create your views here.
 
@@ -59,6 +62,31 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.request.user.user_type == 'accountant':
             return User.objects.filter(accounting_firms__owner=self.request.user)
         return User.objects.filter(id=self.request.user.id)
+
+    @action(detail=True, methods=['get'])
+    def documents(self, request, pk=None):
+        user = self.get_object()
+        documents = user.uploaded_documents.all()
+        serializer = DocumentSerializer(documents, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def stats(self, request, pk=None):
+        user = self.get_object()
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        recent_documents = user.uploaded_documents.filter(
+            created_at__gte=thirty_days_ago
+        )
+        
+        total_documents = recent_documents.count()
+        pending_documents = recent_documents.filter(status='pending').count()
+        processed_documents = recent_documents.filter(status__in=['completed', 'rejected']).count()
+        
+        return Response({
+            'total_documents': total_documents,
+            'pending_documents': pending_documents,
+            'processed_documents': processed_documents
+        })
 
 class AccountingFirmViewSet(viewsets.ModelViewSet):
     queryset = AccountingFirm.objects.all()
@@ -157,32 +185,37 @@ class ProcessDocumentView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAccountant]
 
     def post(self, request, pk):
-        document = get_object_or_404(Document, pk=pk)
-        new_status = request.data.get('status')  # 'processed' veya 'pending'
-        
-        if not new_status or new_status not in ['processed', 'pending']:
-            return Response(
-                {'error': 'Geçersiz durum değeri'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        try:
+            document = Document.objects.get(pk=pk)
+            new_status = request.data.get('status')
 
-        if document.uploaded_by.accounting_firms.filter(owner=request.user).exists():
+            # Status değerini kontrol et
+            valid_statuses = ['pending', 'processing', 'completed', 'rejected']
+            if new_status not in valid_statuses:
+                return Response(
+                    {'error': f'Geçersiz durum değeri. Geçerli değerler: {", ".join(valid_statuses)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Belgeyi güncelle
             document.status = new_status
-            if new_status == 'processed':
-                document.processed_by = request.user
-            else:
-                document.processed_by = None
+            document.processed_by = request.user
             document.save()
-            
-            return Response({
-                'status': new_status,
-                'message': 'Belge durumu başarıyla güncellendi'
-            })
-            
-        return Response(
-            {'error': 'Bu işlem için yetkiniz yok'}, 
-            status=status.HTTP_403_FORBIDDEN
-        )
+
+            # Belgeyi serialize et ve dön
+            serializer = DocumentSerializer(document)
+            return Response(serializer.data)
+
+        except Document.DoesNotExist:
+            return Response(
+                {'error': 'Belge bulunamadı'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class AccountantViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
@@ -221,88 +254,80 @@ class AccountantViewSet(viewsets.ModelViewSet):
             print(f"Email gönderme hatası: {str(e)}")
             return False
 
-    @action(detail=False, methods=['post'])
-    def add_client(self, request):
+    def create(self, request, *args, **kwargs):
+        email = request.data.get('email')
+        
         try:
-            # Mali müşavirin kendi emailini kontrol et
-            email = request.data.get('email')
-            if email == request.user.email:
-                return Response({
-                    'error': 'Kendinizi müşteri olarak ekleyemezsiniz.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # Önce aktif abonelik kontrolü yap
-            try:
-                active_subscription = AccountantSubscription.objects.get(
-                    accountant=request.user,
-                    status='active',
-                    end_date__gt=timezone.now()
+            # Önce bu email ile kayıtlı kullanıcı var mı kontrol et
+            existing_user = User.objects.filter(email=email).first()
+            
+            if existing_user:
+                if existing_user.is_active:
+                    return Response(
+                        {'detail': 'Bu email adresi ile aktif bir kullanıcı zaten mevcut.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                else:
+                    # Pasif kullanıcıyı aktifleştir ve yeni şifre ata
+                    password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+                    existing_user.set_password(password)
+                    existing_user.is_active = True
+                    existing_user.first_name = request.data.get('first_name', existing_user.first_name)
+                    existing_user.last_name = request.data.get('last_name', existing_user.last_name)
+                    existing_user.phone = request.data.get('phone', existing_user.phone)
+                    existing_user.save()
+                    
+                    # Muhasebeci-müşteri ilişkisini kur
+                    firm = request.user.owned_firm.first()
+                    if firm:
+                        firm.clients.add(existing_user)
+                    
+                    # Hoş geldin emaili gönder
+                    self.send_welcome_email(
+                        email=existing_user.email,
+                        password=password,
+                        accountant_name=f"{request.user.first_name} {request.user.last_name}"
+                    )
+                    
+                    return Response({
+                        'detail': 'Pasif kullanıcı başarıyla aktifleştirildi ve müşteriniz olarak eklendi.',
+                        'user': UserSerializer(existing_user).data
+                    }, status=status.HTTP_200_OK)
+            
+            # Yeni kullanıcı oluştur
+            serializer = UserSerializer(data=request.data)
+            if serializer.is_valid():
+                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+                user = serializer.save(
+                    password=password,
+                    user_type='client',
+                    is_active=True
                 )
                 
-                # Muhasebe firmasını bul
-                firm = AccountingFirm.objects.filter(owner=request.user).first()
-                if not firm:
-                    firm = AccountingFirm.objects.create(
-                        owner=request.user,
-                        name=f"{request.user.first_name}'s Firm"
-                    )
+                # Muhasebeci-müşteri ilişkisini kur
+                firm = request.user.owned_firm.first()
+                if firm:
+                    firm.clients.add(user)
                 
-                # Müşteri limitini kontrol et
-                current_client_count = firm.clients.count()
-                if current_client_count >= active_subscription.client_limit:
-                    return Response({
-                        'error': 'Müşteri limitinize ulaştınız. Lütfen planınızı yükseltin.',
-                        'redirect_to_subscription': True
-                    }, status=status.HTTP_403_FORBIDDEN)
+                # Hoş geldin emaili gönder
+                self.send_welcome_email(
+                    email=user.email,
+                    password=password,
+                    accountant_name=f"{request.user.first_name} {request.user.last_name}"
+                )
                 
-            except AccountantSubscription.DoesNotExist:
                 return Response({
-                    'error': 'Aktif bir aboneliğiniz bulunmuyor.',
-                    'redirect_to_subscription': True
-                }, status=status.HTTP_403_FORBIDDEN)
-
-            # Email kontrolü
-            if not email:
-                return Response({'error': 'Email gerekli'}, status=400)
-
-            if User.objects.filter(email=email).exists():
-                return Response({
-                    'error': 'Bu email adresi zaten kullanımda'
-                }, status=400)
-
-            # Rastgele şifre oluştur
-            password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-
-            # Yeni kullanıcı oluştur
-            user = User.objects.create_user(
-                username=email,
-                email=email,
-                password=password,
-                user_type='client',
-                first_name=request.data.get('first_name', ''),
-                last_name=request.data.get('last_name', ''),
-                phone=request.data.get('phone', '')
-            )
-
-            # Email gönder
-            email_sent = self.send_welcome_email(
-                email=email,
-                password=password,
-                accountant_name=f"{request.user.first_name} {request.user.last_name}"
-            )
-
-            # Müşteriyi firmaya ekle
-            firm.clients.add(user)
-
-            return Response({
-                'status': 'success',
-                'message': 'Müşteri eklendi ve bilgilendirme emaili gönderildi',
-                'client': UserSerializer(user).data
-            })
-
+                    'detail': 'Müşteri başarıyla eklendi.',
+                    'user': serializer.data
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
         except Exception as e:
-            print(f"HATA: {str(e)}")
-            return Response({'error': str(e)}, status=400)
+            return Response(
+                {'detail': f'Bir hata oluştu: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['get'])
     def documents(self, request, pk=None):
@@ -362,11 +387,11 @@ class AccountantViewSet(viewsets.ModelViewSet):
                 is_active=True  # Sadece aktif müşterileri getir
             ).annotate(
                 pending_documents_count=Count(
-                    'documents',
-                    filter=Q(documents__status='pending')
+                    'uploaded_documents',
+                    filter=Q(uploaded_documents__status='pending')
                 ),
-                total_documents_count=Count('documents'),
-                last_activity=Max('documents__updated_at')
+                total_documents_count=Count('uploaded_documents'),
+                last_activity=Max('uploaded_documents__updated_at')
             )
             
             serializer = UserSerializer(clients, many=True)
@@ -385,6 +410,40 @@ class AccountantViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+    @action(detail=False, methods=['post'])
+    def add_client(self, request):
+        # Abonelik kontrolü
+        try:
+            active_subscription = AccountantSubscription.objects.get(
+                accountant=request.user,
+                status='active',
+                end_date__gt=timezone.now()
+            )
+            
+            # Muhasebe firmasını bul
+            firm = AccountingFirm.objects.filter(owner=request.user).first()
+            if not firm:
+                firm = AccountingFirm.objects.create(
+                    owner=request.user,
+                    name=f"{request.user.first_name}'s Firm"
+                )
+            
+            # Müşteri limitini kontrol et
+            current_client_count = firm.clients.count()
+            if current_client_count >= active_subscription.client_limit:
+                return Response({
+                    'error': 'Müşteri limitinize ulaştınız. Lütfen planınızı yükseltin.',
+                    'redirect_to_subscription': True
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+        except AccountantSubscription.DoesNotExist:
+            return Response({
+                'error': 'Aktif bir aboneliğiniz bulunmuyor.',
+                'redirect_to_subscription': True
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        return self.create(request)  # Mevcut create metodunu çağır
+
 class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -392,69 +451,28 @@ class DashboardStatsView(APIView):
         user = request.user
         
         if user.user_type == 'accountant':
-            try:
-                # Mali müşavir istatistikleri - firma yoksa oluştur
-                firm = AccountingFirm.objects.filter(
-                    owner=user
-                ).first()
-                
-                total_clients = firm.clients.count()
-                
-                # Bekleyen belgeleri hesapla
-                pending_documents = Document.objects.filter(
-                    uploaded_by__in=firm.clients.all(),
-                    status='pending'
-                ).count()
-
-                # Son aktiviteler
-                recent_activities = Document.objects.select_related('uploaded_by').filter(
-                    uploaded_by__in=firm.clients.all()
-                ).order_by('-created_at')[:5].values(
-                    'id',
-                    'document_type',
-                    'created_at',
-                    'status',
-                    'uploaded_by__first_name',
-                    'uploaded_by__last_name',
-                )
-
-                # Son işlem tarihi
-                latest_document = Document.objects.filter(
-                    uploaded_by__in=firm.clients.all()
-                ).order_by('-updated_at').first()
-
-            except Exception as e:
-                print(f"Hata: {str(e)}")
-                return Response({
-                    'stats': {
-                        'total': 0,
-                        'pending_documents': 0,
-                        'last_activity': None
-                    },
-                    'recent_activities': [],
-                    'error': 'Bir hata oluştu.'
-                })
-
-        else:
-            # Mükellef istatistikleri
-            total_documents = Document.objects.filter(uploaded_by=user).count()
-            pending_documents = Document.objects.filter(
-                uploaded_by=user,
-                status='pending'
-            ).count()
+            # Muhasebeci için istatistikler
+            total_clients = user.owned_firm.first().clients.count() if user.owned_firm.exists() else 0
             
-            latest_document = Document.objects.filter(
-                uploaded_by=user
-            ).order_by('-updated_at').first()
-
-            recent_activities = Document.objects.filter(
-                uploaded_by=user
-            ).order_by('-created_at')[:5].values(
-                'id',
-                'document_type',
-                'created_at',
-                'status'
-            )
+            # Tüm müşterilerin belgelerini al
+            client_ids = user.owned_firm.first().clients.values_list('id', flat=True) if user.owned_firm.exists() else []
+            documents = Document.objects.filter(uploaded_by_id__in=client_ids)
+            
+            pending_documents = documents.filter(status='pending').count()
+            latest_document = documents.order_by('-updated_at').first()
+            
+            # Son aktiviteleri al
+            recent_activities = documents.order_by('-updated_at')[:5]
+            
+        else:
+            # Müşteri için istatistikler
+            # 'documents' yerine 'uploaded_documents' kullanıyoruz
+            total_documents = user.uploaded_documents.count()
+            pending_documents = user.uploaded_documents.filter(status='pending').count()
+            latest_document = user.uploaded_documents.order_by('-updated_at').first()
+            
+            # Son aktiviteleri al
+            recent_activities = user.uploaded_documents.order_by('-updated_at')[:5]
 
         return Response({
             'stats': {
@@ -462,7 +480,7 @@ class DashboardStatsView(APIView):
                 'pending_documents': pending_documents,
                 'last_activity': latest_document.updated_at if latest_document else None
             },
-            'recent_activities': recent_activities
+            'recent_activities': DocumentSerializer(recent_activities, many=True).data
         })
 
 class LoginView(TokenObtainPairView):
@@ -472,11 +490,43 @@ class LoginView(TokenObtainPairView):
         requested_user_type = request.data.get('user_type')
         
         try:
-            # Önce normal login işlemini yap
-            response = super().post(request, *args, **kwargs)
-            
-            # Kullanıcıyı bul
+            # Önce kullanıcıyı bul
             user = User.objects.get(email=request.data['email'])
+            
+            # Şifre kontrolü
+            if not user.check_password(request.data.get('password')):
+                return Response(
+                    {'detail': 'Email adresi veya şifre hatalı'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Email doğrulama kontrolü - sadece accountant için
+            if requested_user_type == 'accountant':
+                try:
+                    email_address = EmailAddress.objects.get(user=user)
+                    if not email_address.verified:
+                        return Response(
+                            {
+                                'detail': 'Lütfen email adresinizi doğrulayın. Spam kutunuzu kontrol etmeyi unutmayın.',
+                                'code': 'email_not_verified'
+                            },
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+                except EmailAddress.DoesNotExist:
+                    # Email doğrulama kaydı yoksa oluştur
+                    email_address = EmailAddress.objects.create(
+                        user=user,
+                        email=user.email,
+                        primary=True,
+                        verified=False
+                    )
+                    return Response(
+                        {
+                            'detail': 'Lütfen email adresinizi doğrulayın. Spam kutunuzu kontrol etmeyi unutmayın.',
+                            'code': 'email_not_verified'
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
             
             # Kullanıcı tipi kontrolü
             if user.user_type != requested_user_type:
@@ -488,6 +538,9 @@ class LoginView(TokenObtainPairView):
                     {'detail': error_message},
                     status=status.HTTP_403_FORBIDDEN
                 )
+            
+            # Normal login işlemini yap
+            response = super().post(request, *args, **kwargs)
             
             # Kullanıcı bilgilerini ekle
             user_data = UserSerializer(user).data
@@ -501,11 +554,6 @@ class LoginView(TokenObtainPairView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            if 'No active account found with the given credentials' in str(e):
-                return Response(
-                    {'detail': 'Email adresi veya şifre hatalı'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
             return Response(
                 {'detail': 'Giriş yapılırken bir hata oluştu'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -972,43 +1020,120 @@ def register(request):
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
     
-    def post(self, request, *args, **kwargs):
-        requested_user_type = request.data.get('user_type')
+    def get(self, request, key, *args, **kwargs):
+        try:
+            confirmation = EmailConfirmation.objects.get(key=key)
+            
+            # Token'ın geçerlilik süresini kontrol et
+            expiration_date = confirmation.sent + timedelta(days=settings.ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS)
+            if timezone.now() > expiration_date:
+                # Eski token'ı sil
+                confirmation.delete()
+                
+                # Yeni doğrulama emaili gönder
+                email_address = confirmation.email_address
+                new_confirmation = EmailConfirmation.create(email_address)
+                new_confirmation.sent = timezone.now()
+                new_confirmation.save()
+                
+                subject = f"{settings.ACCOUNT_EMAIL_SUBJECT_PREFIX}Email Doğrulama"
+                confirmation_url = f"{settings.FRONTEND_URL}/auth/verify-email/{new_confirmation.key}"
+                
+                html_message = render_to_string('email/email_confirmation_message.html', {
+                    'user': email_address.user,
+                    'activate_url': confirmation_url
+                })
+                
+                text_message = strip_tags(html_message)
+                
+                send_email_via_smtp2go(
+                    to_list=email_address.email,
+                    subject=subject,
+                    html_body=html_message,
+                    text_body=text_message
+                )
+                
+                return JsonResponse({
+                    'detail': 'Doğrulama linkinin süresi dolmuş. Yeni doğrulama emaili gönderildi.',
+                    'code': 'token_expired'
+                }, status=400)
+            
+            # Token geçerliyse doğrula
+            confirmation.confirm(request)
+            
+            return JsonResponse({
+                'detail': 'Email adresiniz başarıyla doğrulandı. Giriş yapabilirsiniz.'
+            })
+            
+        except EmailConfirmation.DoesNotExist:
+            return JsonResponse({
+                'detail': 'Geçersiz veya süresi dolmuş doğrulama bağlantısı.'
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'detail': 'Doğrulama sırasında bir hata oluştu.'
+            }, status=500)
+
+class ResendVerificationEmailView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        email = request.data.get('email')
         
         try:
-            response = super().post(request, *args, **kwargs)
-            user = User.objects.get(email=request.data['email'])
+            user = User.objects.get(email=email)
+            email_address = EmailAddress.objects.get(user=user)
             
-            if user.user_type != requested_user_type:
-                if requested_user_type == 'client':
-                    error_message = 'Bu hesap bir mali müşavir hesabıdır.'
-                else:
-                    error_message = 'Bu hesap bir mükellef hesabıdır.'
+            if email_address.verified:
                 return Response(
-                    {'detail': error_message},
-                    status=status.HTTP_403_FORBIDDEN
+                    {'detail': 'Bu email adresi zaten doğrulanmış.'},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
             
-            user_data = UserSerializer(user).data
-            response.data['user'] = user_data
+            # Eski doğrulama kayıtlarını sil
+            EmailConfirmation.objects.filter(email_address=email_address).delete()
             
-            return response
+            # Yeni doğrulama kodu oluştur ve email gönder
+            confirmation = EmailConfirmation.create(email_address)
+            confirmation.sent = timezone.now()
+            confirmation.save()
+            
+            subject = f"{settings.ACCOUNT_EMAIL_SUBJECT_PREFIX}Email Doğrulama"
+            confirmation_url = f"{settings.FRONTEND_URL}/auth/verify-email/{confirmation.key}"
+            
+            html_message = render_to_string('email/email_confirmation_message.html', {
+                'user': user,
+                'activate_url': confirmation_url
+            })
+            
+            text_message = strip_tags(html_message)
+            
+            send_email_via_smtp2go(
+                to_list=email,
+                subject=subject,
+                html_body=html_message,
+                text_body=text_message
+            )
+            
+            return Response({
+                'detail': 'Yeni doğrulama emaili gönderildi. Lütfen email kutunuzu kontrol edin.'
+            })
             
         except User.DoesNotExist:
             return Response(
-                {'detail': 'Bu email adresi ile kayıtlı bir hesap bulunamadı'},
+                {'detail': 'Bu email adresi ile kayıtlı bir hesap bulunamadı.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except EmailAddress.DoesNotExist:
+            return Response(
+                {'detail': 'Bu email adresi için doğrulama kaydı bulunamadı.'},
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            if 'No active account found with the given credentials' in str(e):
-                return Response(
-                    {'detail': 'Email adresi veya şifre hatalı'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
             return Response(
-                {'detail': 'Giriş yapılırken bir hata oluştu'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'detail': 'Email gönderimi sırasında bir hata oluştu.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
