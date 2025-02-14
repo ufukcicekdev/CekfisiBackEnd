@@ -146,6 +146,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -260,7 +263,7 @@ CACHES = {
 
 # CORS ayarlarını geri ekleyelim
 CORS_ALLOWED_ORIGINS = [
-    "https://cekfisi.co",
+    "https://cekfisi.com",
 ]
 
 # Site ID ayarını koruyalım çünkü django.contrib.sites hala kullanılıyor
