@@ -7,7 +7,9 @@ from .views import (
     ProfileUpdateView, 
     ForgotPasswordView, 
     VerifyOTPView,
-    CurrentUserView
+    CurrentUserView,
+    register,
+    CustomTokenObtainPairView
 )
 
 router = DefaultRouter()
@@ -19,8 +21,9 @@ router.register(r'subscription-plans', views.SubscriptionPlanViewSet, basename='
 
 urlpatterns = [
     # Auth endpoints
-    path('auth/login/', LoginView.as_view(), name='token-obtain-pair'),
-    path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    path('auth/register/', register, name='register'),
+    path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # User endpoints - router'dan önce olmalı
     path('users/me/', CurrentUserView.as_view(), name='current-user'),

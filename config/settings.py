@@ -49,16 +49,16 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt',
     'corsheaders',
-    'dj_rest_auth',
-    'dj_rest_auth.registration',
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
     'storages',
     
     # Local apps
     'core',
     'rest_framework_simplejwt.token_blacklist',
+    'dj_rest_auth',
+    'dj_rest_auth.registration',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
 ]
 
 MIDDLEWARE = [
@@ -181,44 +181,25 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
     
     'JTI_CLAIM': 'jti',
+    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
+    
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
 
-REST_AUTH = {
-    'USE_JWT': True,
-    'JWT_AUTH_COOKIE': 'auth-token',
-    'JWT_AUTH_REFRESH_COOKIE': 'refresh-token',
-    'USER_DETAILS_SERIALIZER': 'core.serializers.UserSerializer',
-    'REGISTER_SERIALIZER': 'core.serializers.CustomRegisterSerializer',
-    'PASSWORD_REQUIRED': True,
-}
-
-SITE_ID = 1
-ACCOUNT_EMAIL_VERIFICATION = 'none'
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_UNIQUE_EMAIL = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-AUTHENTICATION_BACKENDS = [
-    'django.contrib.auth.backends.ModelBackend',
-    'allauth.account.auth_backends.AuthenticationBackend',
-]
-
 AUTH_USER_MODEL = 'core.User'
 
-# Allauth ayarları
-ACCOUNT_PASSWORD_INPUT_RENDER_VALUE = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
-ACCOUNT_EMAIL_VERIFICATION = 'none'
+
+
+
 
 # SMTP2GO Configuration
 SMTP2GO_API_KEY = os.getenv('SMTP2GO_API_KEY')
@@ -256,32 +237,20 @@ AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL')
 AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.{AWS_S3_REGION_NAME}.cdn.digitaloceanspaces.com"
 
 AWS_S3_FILE_OVERWRITE = False 
-AWS_DEFAULT_ACL='public-read'
+AWS_DEFAULT_ACL = 'public-read'
 
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-STATICFILES_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-
+# Storage ayarlarını güncelle
 STORAGES = {
     "default": {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-        "OPTIONS": {
-            "bucket_name": AWS_STORAGE_BUCKET_NAME,
-            "custom_domain": AWS_S3_CUSTOM_DOMAIN,
-            "region_name": AWS_S3_REGION_NAME,
-            "endpoint_url": AWS_S3_ENDPOINT_URL,
-            "file_overwrite": AWS_S3_FILE_OVERWRITE,
-        },
     },
     "staticfiles": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-        "OPTIONS": {
-            "bucket_name": AWS_STORAGE_BUCKET_NAME,
-            "custom_domain": AWS_S3_CUSTOM_DOMAIN,
-            "region_name": AWS_S3_REGION_NAME,
-            "endpoint_url": AWS_S3_ENDPOINT_URL,
-        },
+        "BACKEND": "django.core.files.storage.StaticFilesStorage",
     },
 }
+
+# Media files
+MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
 
 # Cache ayarları
 CACHES = {
@@ -290,6 +259,29 @@ CACHES = {
         'LOCATION': 'unique-snowflake',
     }
 }
+
+# CORS ayarlarını geri ekleyelim
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
+
+# Site ID ayarını koruyalım çünkü django.contrib.sites hala kullanılıyor
+SITE_ID = 1
+
+REST_AUTH = {
+    'USE_JWT': True,
+    'JWT_AUTH_COOKIE': 'auth-token',
+    'JWT_AUTH_REFRESH_COOKIE': 'refresh-token',
+    'USER_DETAILS_SERIALIZER': 'core.serializers.UserSerializer',
+    'REGISTER_SERIALIZER': 'core.serializers.CustomRegisterSerializer',
+    'JWT_AUTH_HTTPONLY': False,
+}
+
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+ACCOUNT_EMAIL_REQUIRED = True
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_AUTHENTICATION_METHOD = 'email'
 
 
 

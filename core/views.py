@@ -4,7 +4,18 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from .models import User, AccountingFirm, Document, SubscriptionPlan, AccountantSubscription
-from .serializers import UserSerializer, AccountingFirmSerializer, DocumentSerializer, DocumentUploadSerializer, CustomTokenObtainPairSerializer, SubscriptionPlanSerializer, SubscriptionSerializer, ForgotPasswordSerializer, VerifyOTPSerializer
+from .serializers import (
+    UserSerializer, 
+    AccountingFirmSerializer, 
+    DocumentSerializer, 
+    DocumentUploadSerializer, 
+    CustomTokenObtainPairSerializer, 
+    SubscriptionPlanSerializer, 
+    SubscriptionSerializer, 
+    ForgotPasswordSerializer, 
+    VerifyOTPSerializer,
+    CustomRegisterSerializer
+)
 from .permissions import IsAccountant, IsClientOrAccountant
 from rest_framework.decorators import action, api_view, permission_classes
 from django.contrib.auth import get_user_model
@@ -25,6 +36,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from django.core.cache import cache
+from rest_framework.permissions import AllowAny
 
 # Create your views here.
 
@@ -946,4 +958,57 @@ class VerifyOTPView(APIView):
             return Response(
                 {'error': 'Bir hata oluştu'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register(request):
+    serializer = CustomRegisterSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save(request)
+        return Response({
+            'user': UserSerializer(user).data,
+            'message': 'Kullanıcı başarıyla oluşturuldu'
+        }, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
+    
+    def post(self, request, *args, **kwargs):
+        requested_user_type = request.data.get('user_type')
+        
+        try:
+            response = super().post(request, *args, **kwargs)
+            user = User.objects.get(email=request.data['email'])
+            
+            if user.user_type != requested_user_type:
+                if requested_user_type == 'client':
+                    error_message = 'Bu hesap bir mali müşavir hesabıdır.'
+                else:
+                    error_message = 'Bu hesap bir mükellef hesabıdır.'
+                return Response(
+                    {'detail': error_message},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            user_data = UserSerializer(user).data
+            response.data['user'] = user_data
+            
+            return response
+            
+        except User.DoesNotExist:
+            return Response(
+                {'detail': 'Bu email adresi ile kayıtlı bir hesap bulunamadı'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            if 'No active account found with the given credentials' in str(e):
+                return Response(
+                    {'detail': 'Email adresi veya şifre hatalı'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                {'detail': 'Giriş yapılırken bir hata oluştu'},
+                status=status.HTTP_400_BAD_REQUEST
             )
