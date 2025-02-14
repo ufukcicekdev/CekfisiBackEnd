@@ -144,9 +144,7 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/4.2/howto/static-files/
-
-STATIC_URL = "static/"
+STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
@@ -245,7 +243,7 @@ STORAGES = {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
     },
     "staticfiles": {
-        "BACKEND": "django.core.files.storage.StaticFilesStorage",
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
 
@@ -262,7 +260,7 @@ CACHES = {
 
 # CORS ayarlarını geri ekleyelim
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
+    "https://cekfisi.co",
 ]
 
 # Site ID ayarını koruyalım çünkü django.contrib.sites hala kullanılıyor
