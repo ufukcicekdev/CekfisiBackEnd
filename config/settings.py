@@ -246,11 +246,16 @@ STORAGES = {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
     },
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        "OPTIONS": {
+            "location": "static",  # DigitalOcean Spaces'te static klasörü
+            "default_acl": "public-read",
+        },
     },
 }
 
-# Media files
+# Static ve Media URLs
+STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/static/'
 MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
 
 # Cache ayarları
@@ -264,6 +269,18 @@ CACHES = {
 # CORS ayarlarını geri ekleyelim
 CORS_ALLOWED_ORIGINS = [
     "https://cekfisi.com",
+    "http://localhost:3000",  # Development için
+]
+
+# CORS ayarlarını genişletelim
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
 ]
 
 # Site ID ayarını koruyalım çünkü django.contrib.sites hala kullanılıyor
