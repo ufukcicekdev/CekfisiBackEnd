@@ -267,7 +267,7 @@ CACHES = {
     }
 }
 
-# CORS ayarlarını geri ekleyelim
+# CORS ve CSRF ayarları
 CORS_ALLOWED_ORIGINS = [
     "https://cekfisifrontend-production.up.railway.app",
     "https://cekfisi.com",
@@ -275,15 +275,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "https://cekfisibackend-production.up.railway.app"
 ]
- 
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://cekfisifrontend-production.up.railway.app",
+    "https://cekfisi.com",
+    "https://www.cekfisi.com",
+    "https://cekfisibackend-production.up.railway.app"
+]
 
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
-
-
-
-# CORS ayarlarını genişletelim
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -293,6 +292,17 @@ CORS_ALLOW_METHODS = [
     'POST',
     'PUT',
 ]
+
+# Cookie ayarları
+CSRF_COOKIE_SECURE = True  # HTTPS üzerinden
+SESSION_COOKIE_SECURE = True  # HTTPS üzerinden
+CSRF_COOKIE_SAMESITE = 'Lax'  # veya 'None' (HTTPS gerektirir)
+SESSION_COOKIE_SAMESITE = 'Lax'  # veya 'None' (HTTPS gerektirir)
+
+# Production ortamında
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Site ID ayarını koruyalım çünkü django.contrib.sites hala kullanılıyor
 SITE_ID = 1
