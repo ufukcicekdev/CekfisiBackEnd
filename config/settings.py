@@ -287,6 +287,8 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://cekfisifrontend-production.up.railway.app",
+    "https://cekfisi.com"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -404,11 +406,17 @@ CHANNEL_SETTINGS = {
 CORS_ALLOWED_ORIGINS += [
     "ws://localhost:3000",
     "ws://127.0.0.1:3000",
-    "wss://cekfisifrontend-production.up.railway.app/"
+    "wss://cekfisibackend-production.up.railway.app",
+    "wss://cekfisi.com"
 ]
 
 # WebSocket için allowed hosts
-ALLOWED_HOSTS += ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = [
+    'localhost', 
+    '127.0.0.1',
+    'cekfisibackend-production.up.railway.app',
+    'cekfisi.com'
+]
 
 # Logging ayarları
 LOGGING = {
