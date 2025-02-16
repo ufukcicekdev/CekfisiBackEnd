@@ -30,12 +30,13 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
+ALLOWED_HOSTS = ['*']  # Development için, production'da spesifik domainler kullanın
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -59,6 +60,8 @@ INSTALLED_APPS = [
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
+    'channels',
+    'chat',
 ]
 
 MIDDLEWARE = [
@@ -157,12 +160,15 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
+    'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
-    ),
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,  # Her sayfada 20 mesaj
 }
 
 SIMPLE_JWT = {
@@ -230,7 +236,10 @@ PAYTR_MERCHANT_KEY = os.getenv('PAYTR_MERCHANT_KEY')
 PAYTR_MERCHANT_SALT = os.getenv('PAYTR_MERCHANT_SALT')
 PAYTR_TEST_MODE = int(os.getenv('PAYTR_TEST_MODE', '1'))
 
-# DigitalOcean Spaces Configuration
+# Storage ayarları
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'  # AWS için değiştirdik
+
+# AWS/DigitalOcean Spaces ayarları
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
@@ -238,21 +247,25 @@ AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME')
 AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL')
 AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.{AWS_S3_REGION_NAME}.cdn.digitaloceanspaces.com"
 
-AWS_S3_FILE_OVERWRITE = False 
-AWS_DEFAULT_ACL = 'public-read'
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = 'public-read'  # Dosyaların public olması için
+AWS_S3_VERIFY = True
+AWS_S3_SIGNATURE_VERSION = 's3v4'
 
-# Storage ayarlarını güncelle
-STORAGES = {
-    "default": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-    },
-    "staticfiles": {
-        "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
-        "OPTIONS": {
-            "location": "static",  # DigitalOcean Spaces'te static klasörü
-            "default_acl": "public-read",
-        },
-    },
+# Chat dosyaları için özel ayarlar
+CHAT_FILE_STORAGE = {
+    'max_size': 10 * 1024 * 1024,  # 10MB
+    'allowed_types': [
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+    ],
+    'upload_path': 'chat_files/%Y/%m/%d/'
 }
 
 # Static ve Media URLs
@@ -268,22 +281,22 @@ CACHES = {
 }
 
 # CORS ve CSRF ayarları
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
 CORS_ALLOWED_ORIGINS = [
-    "https://cekfisifrontend-production.up.railway.app",
-    "https://cekfisi.com",
-    "https://www.cekfisi.com",
     "http://localhost:3000",
-    "https://cekfisibackend-production.up.railway.app"
+    "http://127.0.0.1:3000",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
     "https://cekfisifrontend-production.up.railway.app",
     "https://cekfisi.com",
     "https://www.cekfisi.com",
-    "https://cekfisibackend-production.up.railway.app"
+    "https://cekfisibackend-production.up.railway.app",
+    "http://localhost:8000"
 ]
 
-CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
     'DELETE',
     'GET',
@@ -367,6 +380,76 @@ ACCOUNT_EMAIL_CONFIRMATION_URL = f"{FRONTEND_URL}/auth/verify-email/{{key}}"
 
 # URL ayarları
 APPEND_SLASH = False  # URL sonunda / zorunluluğunu kaldır
+
+# Channels ve ASGI ayarları
+ASGI_APPLICATION = "config.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+        "CONFIG": {
+            "capacity": 1500,
+        },
+    }
+}
+
+# WebSocket ayarları
+CHANNEL_SETTINGS = {
+    'PING_INTERVAL': 30,  # 30 saniye
+    'PING_TIMEOUT': 20,   # 20 saniye
+    'MAX_RECONNECT_ATTEMPTS': 5
+}
+
+# WebSocket için CORS ayarları
+CORS_ALLOWED_ORIGINS += [
+    "ws://localhost:3000",
+    "ws://127.0.0.1:3000",
+    "https://cekfisifrontend-production.up.railway.app/"
+]
+
+# WebSocket için allowed hosts
+ALLOWED_HOSTS += ['localhost', '127.0.0.1']
+
+# Logging ayarları
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{levelname}] {asctime} {module} {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': 'websocket.log',
+            'formatter': 'verbose',
+        }
+    },
+    'loggers': {
+        'chat.consumers': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'daphne': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'channels': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        }
+    },
+}
 
 
 

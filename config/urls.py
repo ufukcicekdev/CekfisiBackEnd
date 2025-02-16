@@ -24,7 +24,7 @@ from core.views import VerifyEmailView, ResendVerificationEmailView  # Kendi vie
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('core.urls')),
-    
+    path('api/v1/chat/', include('chat.urls')),
     # Email doğrulama URL'leri - sonunda / ekleyelim
     path(
         'api/v1/auth/verify-email/<str:key>/',  # Sonunda / var
