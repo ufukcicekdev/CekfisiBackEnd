@@ -7,7 +7,7 @@
     },
     "deploy": {
       "numReplicas": 1,
-      "startCommand": "daphne config.asgi:application --port $PORT --bind 0.0.0.0 -v2",
+      "startCommand": "DJANGO_SETTINGS_MODULE=config.settings daphne -b 0.0.0.0 -p $PORT config.asgi:application",
       "sleepApplication": false,
       "restartPolicyType": "ON_FAILURE",
       "restartPolicyMaxRetries": 10
