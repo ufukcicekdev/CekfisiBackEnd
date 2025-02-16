@@ -404,7 +404,7 @@ CHANNEL_SETTINGS = {
 CORS_ALLOWED_ORIGINS += [
     "ws://localhost:3000",
     "ws://127.0.0.1:3000",
-    "https://cekfisifrontend-production.up.railway.app/"
+    "wss://cekfisifrontend-production.up.railway.app/"
 ]
 
 # WebSocket için allowed hosts
