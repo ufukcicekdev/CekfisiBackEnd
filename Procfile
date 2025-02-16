@@ -1,1 +1,1 @@
-web: gunicorn config.wsgi. --workers 3
+web: daphne config.asgi:application --port $PORT --bind 0.0.0.0 -v2
