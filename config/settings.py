@@ -281,15 +281,13 @@ CACHES = {
 }
 
 # CORS ve CSRF ayarları
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True  # Geliştirme için
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://cekfisifrontend-production.up.railway.app",
-    "https://cekfisi.com",
-    "wss://cekfisibackend-production.up.railway.app",  # WebSocket için
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -398,17 +396,17 @@ CHANNEL_LAYERS = {
 
 # WebSocket ayarları
 CHANNEL_SETTINGS = {
-    'PING_INTERVAL': 30,  # 30 saniye
-    'PING_TIMEOUT': 20,   # 20 saniye
+    'PING_INTERVAL': 30,
+    'PING_TIMEOUT': 20,
     'MAX_RECONNECT_ATTEMPTS': 5
 }
 
-# WebSocket için allowed hosts - Railway için önemli
+# WebSocket için allowed hosts
 ALLOWED_HOSTS = [
     'localhost', 
     '127.0.0.1',
     'cekfisibackend-production.up.railway.app',
-    'cekfisi.com'
+    '.railway.app',  # Tüm railway.app alt domainleri
 ]
 
 # Logging ayarları
