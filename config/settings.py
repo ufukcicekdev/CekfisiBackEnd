@@ -386,19 +386,20 @@ APPEND_SLASH = False  # URL sonunda / zorunluluğunu kaldır
 ASGI_APPLICATION = "config.asgi.application"
 
 CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-        "CONFIG": {
-            "capacity": 1500,
-        },
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer'  # Test ortamı için in-memory
+        # Production için Redis kullanılabilir:
+        # 'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        # 'CONFIG': {
+        #     "hosts": [('127.0.0.1', 6379)],
+        # },
     }
 }
 
 # WebSocket ayarları
 CHANNEL_SETTINGS = {
-    'PING_INTERVAL': 30,
-    'PING_TIMEOUT': 20,
-    'MAX_RECONNECT_ATTEMPTS': 5
+    'PING_INTERVAL': 30,  # saniye
+    'PING_TIMEOUT': 20,   # saniye
 }
 
 # WebSocket için allowed hosts
@@ -448,6 +449,12 @@ LOGGING = {
             'propagate': True,
         }
     },
+}
+
+# Channel Security Settings
+CHANNEL_SECURITY = {
+    'TOKEN_EXPIRY': 3600,  # 1 saat
+    'ALGORITHMS': ['HS256'],
 }
 
 
