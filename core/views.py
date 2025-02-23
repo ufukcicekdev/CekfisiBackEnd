@@ -1,9 +1,9 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from .models import User, AccountingFirm, Document, SubscriptionPlan, AccountantSubscription
+from .models import User, AccountingFirm, Document, SubscriptionPlan, AccountantSubscription, ClientDocument
 from allauth.account.models import EmailAddress, EmailConfirmation  # allauth'dan import
 from .serializers import (
     UserSerializer, 
@@ -15,7 +15,12 @@ from .serializers import (
     SubscriptionSerializer, 
     ForgotPasswordSerializer, 
     VerifyOTPSerializer,
-    CustomRegisterSerializer
+    CustomRegisterSerializer,
+    AccountantListSerializer,
+    CitySerializer,
+    RegionSerializer,
+    SubRegionSerializer,
+    ClientDocumentSerializer
 )
 from .permissions import IsAccountant, IsClientOrAccountant
 from rest_framework.decorators import action, api_view, permission_classes
@@ -39,7 +44,9 @@ from rest_framework.pagination import PageNumberPagination
 from django.core.cache import cache
 from rest_framework.permissions import AllowAny
 from allauth.account.views import ConfirmEmailView
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
+from cities_light.models import City, Region, SubRegion
+import requests
 
 # Create your views here.
 
@@ -98,15 +105,16 @@ class AccountingFirmViewSet(viewsets.ModelViewSet):
 
 class DocumentViewSet(viewsets.ModelViewSet):
     serializer_class = DocumentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClientOrAccountant]
-    parser_classes = (MultiPartParser, FormParser, JSONParser)
+    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.user_type == 'accountant':
-            return Document.objects.filter(
-                uploaded_by__accounting_firms__owner=self.request.user
-            )
-        return Document.objects.filter(uploaded_by=self.request.user)
+        if self.request.user.user_type == 'client':
+            return Document.objects.filter(uploaded_by=self.request.user)
+        elif self.request.user.user_type == 'accountant':
+            client_ids = self.request.user.accounting_firms.first().clients.values_list('id', flat=True)
+            return Document.objects.filter(uploaded_by_id__in=client_ids)
+        return Document.objects.none()
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
@@ -155,6 +163,50 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            
+            # Yetki kontrolü
+            if request.user.user_type == 'client' and instance.uploaded_by != request.user:
+                return Response(
+                    {'error': 'Bu belgeyi silme yetkiniz yok'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            elif request.user.user_type == 'accountant':
+                # Muhasebecinin müşterisi değilse erişim yok
+                client_ids = request.user.accounting_firms.first().clients.values_list('id', flat=True)
+                if instance.uploaded_by.id not in client_ids:
+                    return Response(
+                        {'error': 'Bu belgeyi silme yetkiniz yok'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            
+            # Önce S3'teki dosyayı sil
+            if instance.file:
+                try:
+                    # Storage'dan dosyayı sil
+                    instance.file.delete(save=False)
+                    print(f"Dosya silindi: {instance.file.name}")
+                except Exception as e:
+                    print(f"Dosya silinirken hata: {str(e)}")
+                    # Dosya silinirken hata olsa bile devam et
+                    pass
+            
+            # Sonra veritabanından kaydı sil
+            instance.delete()
+            
+            return Response({
+                'status': 'success',
+                'message': 'Belge ve ilgili dosya başarıyla silindi'
+            })
+            
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': f'Silme işlemi sırasında hata: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
     def upload(self, request):
@@ -749,14 +801,35 @@ class ProfileUpdateView(APIView):
     def patch(self, request):
         try:
             user = request.user
-            # Debug için print ekleyelim
             print("Gelen veri:", request.data)
-            print("Mevcut kullanıcı:", user)
             
-            serializer = UserSerializer(user, data=request.data, partial=True)
+            if user.user_type == 'accountant':
+                allowed_fields = [
+                    'first_name', 'last_name', 'phone', 'email',
+                    'address', 'city', 'district', 'about',
+                    'experience_years', 'title', 'company_name',
+                    'website', 'profile_image', 'specializations'
+                ]
+            else:  # client için
+                allowed_fields = [
+                    'first_name', 'last_name', 'phone', 'email',
+                    'tax_number', 'identity_number', 'company_type', 
+                    'company_title'
+                ]
+
+            # QueryDict'ten normal dict'e çevir ve ilk değerleri al
+            update_data = {}
+            for key in allowed_fields:
+                if key in request.data:
+                    # QueryDict'ten gelen liste değerinin ilk elemanını al
+                    value = request.data.getlist(key)[0] if isinstance(request.data.getlist(key), list) else request.data.get(key)
+                    update_data[key] = value
+            
+            print("İşlenecek veri:", update_data)
+            
+            serializer = UserSerializer(user, data=update_data, partial=True)
             
             if serializer.is_valid():
-                print("Serializer valid")
                 serializer.save()
                 return Response(serializer.data)
             else:
@@ -767,7 +840,7 @@ class ProfileUpdateView(APIView):
                 )
             
         except Exception as e:
-            print("Hata:", str(e))  # Debug için
+            print("Hata:", str(e))
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
@@ -1137,3 +1210,187 @@ class ResendVerificationEmailView(APIView):
                 {'detail': 'Email gönderimi sırasında bir hata oluştu.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def accountant_list(request):
+    """Mali müşavirleri listele"""
+    try:
+        # Query parametrelerini al
+        city = request.query_params.get('city')
+        district = request.query_params.get('district')
+        specialization = request.query_params.get('specialization')
+        search = request.query_params.get('search')
+        
+        # Base query
+        queryset = User.objects.filter(user_type='accountant', is_active=True)
+        
+        # Filtreleri uygula
+        if city:
+            queryset = queryset.filter(city__iexact=city)
+        if district:
+            queryset = queryset.filter(district__iexact=district)
+        if specialization:
+            queryset = queryset.filter(specializations__contains=[specialization])
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(company_name__icontains=search) |
+                Q(about__icontains=search)
+            )
+        
+        # Sıralama
+        queryset = queryset.order_by('-is_featured', '-rating', '-review_count')
+        
+        # Serialize
+        serializer = AccountantListSerializer(queryset, many=True)
+        
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def city_list(request):
+    """Türkiye'deki illeri listele"""
+    cities = Region.objects.filter(country__code2='TR')
+    serializer = RegionSerializer(cities, many=True)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def district_list(request, city_id):
+    """İlin ilçelerini listele"""
+    districts = SubRegion.objects.filter(
+        region_id=city_id,
+        region__country__code2='TR'
+    )
+    serializer = SubRegionSerializer(districts, many=True)
+    return Response(serializer.data)
+
+class ClientDocumentViewSet(viewsets.ModelViewSet):
+    serializer_class = ClientDocumentSerializer
+    parser_classes = (MultiPartParser, FormParser)
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        if self.request.user.user_type == 'client':
+            return ClientDocument.objects.filter(client=self.request.user)
+        elif self.request.user.user_type == 'accountant':
+            client_ids = self.request.user.accounting_firms.first().clients.values_list('id', flat=True)
+            return ClientDocument.objects.filter(client_id__in=client_ids)
+        return ClientDocument.objects.none()
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'status': 'success',
+            'data': serializer.data
+        })
+
+    def perform_create(self, serializer):
+        current_count = ClientDocument.objects.filter(
+            client=self.request.user,
+            is_active=True
+        ).count()
+        
+        if current_count >= 10:
+            raise ValidationError('Maximum 10 aktif belge yükleyebilirsiniz')
+            
+        serializer.save(client=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            
+            # Yetki kontrolü
+            if request.user.user_type == 'client' and instance.client != request.user:
+                return Response(
+                    {'error': 'Bu belgeyi silme yetkiniz yok'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Önce S3'teki dosyayı sil
+            if instance.file:
+                try:
+                    # Storage'dan dosyayı sil
+                    instance.file.delete(save=False)
+                    print(f"Dosya silindi: {instance.file.name}")
+                except Exception as e:
+                    print(f"Dosya silinirken hata: {str(e)}")
+                    # Dosya silinirken hata olsa bile devam et
+                    pass
+            
+            # Sonra veritabanından kaydı sil
+            instance.delete()
+            
+            return Response({
+                'status': 'success',
+                'message': 'Belge ve ilgili dosya başarıyla silindi'
+            })
+            
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': f'Silme işlemi sırasında hata: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def download_document(request, document_id):
+    try:
+        document = get_object_or_404(ClientDocument, id=document_id)
+        
+        # Yetki kontrolü
+        if request.user.user_type == 'client' and document.client != request.user:
+            return Response(
+                {'error': 'Bu belgeyi indirme yetkiniz yok'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        elif request.user.user_type == 'accountant':
+            # Muhasebecinin müşterisi değilse erişim yok
+            client_ids = request.user.accounting_firms.first().clients.values_list('id', flat=True)
+            if document.client.id not in client_ids:
+                return Response(
+                    {'error': 'Bu belgeyi indirme yetkiniz yok'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        # CDN'den dosyayı al
+        response = requests.get(document.file.url)
+        
+        if response.status_code != 200:
+            return Response(
+                {'error': 'Dosya bulunamadı'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Content-Type ve diğer header'ları ayarla
+        content_type = response.headers.get('Content-Type', 'application/octet-stream')
+        
+        # Django response oluştur
+        django_response = HttpResponse(
+            response.content,
+            content_type=content_type
+        )
+        
+        # Dosya adını ayarla
+        filename = document.file.name.split('/')[-1]
+        django_response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        return django_response
+        
+    except Exception as e:
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_400_BAD_REQUEST
+        )

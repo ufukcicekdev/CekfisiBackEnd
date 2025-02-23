@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount',
     'channels',
     'chat',
+    'cities_light',
 ]
 
 MIDDLEWARE = [
@@ -456,6 +457,11 @@ CHANNEL_SECURITY = {
     'TOKEN_EXPIRY': 3600,  # 1 saat
     'ALGORITHMS': ['HS256'],
 }
+
+# Cities Light ayarları
+CITIES_LIGHT_TRANSLATION_LANGUAGES = ['tr']
+CITIES_LIGHT_INCLUDE_COUNTRIES = ['TR']
+CITIES_LIGHT_INCLUDE_CITY_TYPES = ['PPL', 'PPLA', 'PPLA2', 'PPLA3', 'PPLA4']
 
 
 

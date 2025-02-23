@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from django.core.files.storage import default_storage
 import uuid
+from django.core.exceptions import ValidationError
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -35,6 +36,32 @@ class User(AbstractUser):
     otp = models.CharField(max_length=6, null=True, blank=True)
     otp_created_at = models.DateTimeField(null=True, blank=True)
 
+    # Accountant profil bilgileri
+    address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    district = models.CharField(max_length=100, blank=True, null=True)  # İlçe
+    about = models.TextField(blank=True, null=True)  # Hakkında/Biyografi
+    experience_years = models.IntegerField(default=0)  # Deneyim yılı
+    title = models.CharField(max_length=100, blank=True, null=True)  # Ünvan
+    company_name = models.CharField(max_length=200, blank=True, null=True)
+    website = models.URLField(blank=True, null=True)
+    profile_image = models.ImageField(upload_to='profile_images/', blank=True, null=True)
+    specializations = models.JSONField(default=list, blank=True)  # Uzmanlık alanları
+    is_featured = models.BooleanField(default=False)  # Öne çıkan mali müşavir
+    rating = models.FloatField(default=0.0)  # Değerlendirme puanı
+    review_count = models.IntegerField(default=0)  # Değerlendirme sayısı
+
+    # Client için ek alanlar
+    tax_number = models.CharField(max_length=11, blank=True, null=True)  # VKN
+    identity_number = models.CharField(max_length=11, blank=True, null=True)  # TCKN
+    company_type = models.CharField(max_length=20, choices=(
+        ('individual', 'Şahıs'),
+        ('limited', 'Limited Şirket'),
+        ('incorporated', 'Anonim Şirket'),
+        ('other', 'Diğer')
+    ), blank=True, null=True)
+    company_title = models.CharField(max_length=255, blank=True, null=True)  # Firma Ünvanı
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
@@ -52,6 +79,16 @@ class User(AbstractUser):
         self.is_active = True
         self.deleted_at = None
         self.save()
+
+    def clean(self):
+        if self.user_type == 'client':
+            if not (self.tax_number or self.identity_number):
+                raise ValidationError('VKN veya TCKN zorunludur')
+
+    class Meta:
+        db_table = 'users'
+        verbose_name = 'Kullanıcı'
+        verbose_name_plural = 'Kullanıcılar'
 
 class AccountingFirm(models.Model):
     name = models.CharField(max_length=255)
@@ -174,3 +211,67 @@ class AccountantSubscription(models.Model):
     def get_remaining_client_slots(self):
         current_clients = self.accountant.accounting_firms.first().clients.count()
         return self.client_limit - current_clients
+
+class City(models.Model):
+    name = models.CharField(max_length=100)
+    plate_number = models.CharField(max_length=2, unique=True)  # Plaka kodu
+
+    def __str__(self):
+        return f"{self.name} ({self.plate_number})"
+
+    class Meta:
+        verbose_name = 'İl'
+        verbose_name_plural = 'İller'
+        ordering = ['name']
+
+class District(models.Model):
+    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='districts')
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"{self.city.name} - {self.name}"
+
+    class Meta:
+        verbose_name = 'İlçe'
+        verbose_name_plural = 'İlçeler'
+        ordering = ['name']
+        unique_together = ['city', 'name']  # Aynı şehirde aynı isimde ilçe olmasın
+
+class ClientDocument(models.Model):
+    DOCUMENT_TYPES = (
+        ('identity', 'Kimlik Fotokopisi'),
+        ('signature', 'İmza Sirküleri'),
+        ('tax', 'Vergi Levhası'),
+        ('statement', 'Beyanname'),
+        ('other', 'Diğer')
+    )
+
+    client = models.ForeignKey(User, on_delete=models.CASCADE, related_name='documents')
+    title = models.CharField(max_length=255)  # Kullanıcının verdiği başlık
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPES)
+    file = models.FileField(upload_to='client_documents/')
+    description = models.TextField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)  # Belge hala geçerli mi
+    expiry_date = models.DateField(null=True, blank=True)  # Varsa geçerlilik süresi
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Müşteri Belgesi'
+        verbose_name_plural = 'Müşteri Belgeleri'
+
+    def __str__(self):
+        return f"{self.client.email} - {self.title}"
+
+    @property
+    def file_url(self):
+        if self.file:
+            return self.file.url
+        return None
+
+    @property
+    def file_name(self):
+        if self.file:
+            return self.file.name.split('/')[-1]
+        return None

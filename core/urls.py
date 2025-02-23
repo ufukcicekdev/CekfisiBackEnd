@@ -17,6 +17,7 @@ router.register(r'accountants', views.AccountantViewSet, basename='accountant')
 router.register(r'firms', views.AccountingFirmViewSet)
 router.register(r'documents', views.DocumentViewSet, basename='document')
 router.register(r'subscription-plans', views.SubscriptionPlanViewSet, basename='subscription-plans')
+router.register(r'client-documents', views.ClientDocumentViewSet, basename='client-document')
 
 urlpatterns = [
     # Auth endpoints
@@ -35,6 +36,10 @@ urlpatterns = [
     path('subscriptions/current/', views.SubscriptionView.as_view(), name='subscription-current'),
     path('forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
     path('verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('accountants/', views.accountant_list, name='accountant-list'),
+    path('cities/', views.city_list, name='city-list'),
+    path('cities/<int:city_id>/districts/', views.district_list, name='district-list'),
+    path('client-documents/<int:document_id>/download/', views.download_document, name='document-download'),
     
     # Router URLs en sonda olmalı
     path('', include(router.urls)),
