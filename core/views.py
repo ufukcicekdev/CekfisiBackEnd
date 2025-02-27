@@ -47,6 +47,7 @@ from allauth.account.views import ConfirmEmailView
 from django.http import JsonResponse, HttpResponse
 from cities_light.models import City, Region, SubRegion
 import requests
+from django.contrib.auth.hashers import make_password
 
 # Create your views here.
 
@@ -115,6 +116,30 @@ class DocumentViewSet(viewsets.ModelViewSet):
             client_ids = self.request.user.accounting_firms.first().clients.values_list('id', flat=True)
             return Document.objects.filter(uploaded_by_id__in=client_ids)
         return Document.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        print("Gelen veri:", request.data)  # Debug için
+        
+        try:
+            data = {
+                'document_type': request.data.get('document_type'),
+                'file': request.data.get('file'),
+                'date': request.data.get('date'),
+                'amount': request.data.get('amount'),
+                'vat_rate': request.data.get('vat_rate'),
+            }
+            
+            serializer = self.get_serializer(data=data)
+            if serializer.is_valid():
+                self.perform_create(serializer)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            else:
+                print("Serializer hataları:", serializer.errors)  # Debug için
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            print("Hata:", str(e))  # Debug için
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
         serializer.save(uploaded_by=self.request.user)
@@ -208,31 +233,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 'message': f'Silme işlemi sırasında hata: {str(e)}'
             }, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['post'])
-    def upload(self, request):
-        print("Gelen veri:", request.data)  # Debug için
-        
-        try:
-            data = {
-                'document_type': request.data.get('document_type'),
-                'file': request.data.get('file'),
-                'date': request.data.get('date'),
-                'amount': request.data.get('amount'),
-                'vat_rate': request.data.get('vat_rate'),
-            }
-            
-            serializer = self.get_serializer(data=data)
-            if serializer.is_valid():
-                self.perform_create(serializer)
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            else:
-                print("Serializer hataları:", serializer.errors)  # Debug için
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-                
-        except Exception as e:
-            print("Hata:", str(e))  # Debug için
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
 class ProcessDocumentView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsAccountant]
 
@@ -320,9 +320,9 @@ class AccountantViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 else:
-                    # Pasif kullanıcıyı aktifleştir ve yeni şifre ata
+                    # Güvenli şifre oluştur ve hashle
                     password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-                    existing_user.set_password(password)
+                    existing_user.password = make_password(password)  # Şifreyi hashle
                     existing_user.is_active = True
                     existing_user.first_name = request.data.get('first_name', existing_user.first_name)
                     existing_user.last_name = request.data.get('last_name', existing_user.last_name)
@@ -351,7 +351,7 @@ class AccountantViewSet(viewsets.ModelViewSet):
             if serializer.is_valid():
                 password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
                 user = serializer.save(
-                    password=password,
+                    password=make_password(password),  # Şifreyi hashle
                     user_type='client',
                     is_active=True
                 )
@@ -496,6 +496,40 @@ class AccountantViewSet(viewsets.ModelViewSet):
 
         return self.create(request)  # Mevcut create metodunu çağır
 
+    @action(detail=True, methods=['patch'], url_path='documents/(?P<document_id>[^/.]+)')
+    def update_document(self, request, pk=None, document_id=None):
+        try:
+            # Muhasebecinin ve belgenin varlığını kontrol et
+            accountant = self.get_object()
+            document = Document.objects.get(id=document_id)
+            
+            # Muhasebecinin bu belgeyi güncelleme yetkisi var mı kontrol et
+            client_ids = accountant.accounting_firms.first().clients.values_list('id', flat=True)
+            if document.uploaded_by.id not in client_ids:
+                return Response(
+                    {"detail": "Bu belgeyi güncelleme yetkiniz yok."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Sadece amount ve vat_rate alanlarını güncelle
+            serializer = DocumentSerializer(
+                document,
+                data=request.data,
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Document.DoesNotExist:
+            return Response(
+                {"detail": "Belge bulunamadı."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
 class DashboardStatsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -544,8 +578,9 @@ class LoginView(TokenObtainPairView):
         try:
             # Önce kullanıcıyı bul
             user = User.objects.get(email=request.data['email'])
-            
             # Şifre kontrolü
+            print("*********",user)
+
             if not user.check_password(request.data.get('password')):
                 return Response(
                     {'detail': 'Email adresi veya şifre hatalı'},

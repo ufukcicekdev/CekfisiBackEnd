@@ -130,6 +130,7 @@ class Document(models.Model):
     processed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='processed_documents')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    analyzed_data = models.JSONField(null=True, blank=True)  # OpenAI analiz sonuçları için
 
     def __str__(self):
         return f"{self.get_document_type_display()} - {self.date}"

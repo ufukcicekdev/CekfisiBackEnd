@@ -237,47 +237,131 @@ class AccountingFirmSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 class DocumentSerializer(serializers.ModelSerializer):
+    receipt_details = serializers.SerializerMethodField(read_only=True)
+    file_url = serializers.SerializerMethodField(read_only=True)
+    file_name = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Document
         fields = [
             'id', 'document_type', 'file', 'date', 
             'amount', 'vat_rate', 'status', 'uploaded_by',
-            'processed_by', 'created_at', 'updated_at'
+            'processed_by', 'created_at', 'updated_at',
+            'receipt_details', 'file_url', 'file_name'
         ]
-        read_only_fields = ['uploaded_by', 'processed_by', 'status']
+        read_only_fields = ['uploaded_by', 'processed_by', 'status', 'receipt_details', 'file_url', 'file_name']
 
-    def validate(self, data):
-        document_type = data.get('document_type')
-        amount = data.get('amount')
-        vat_rate = data.get('vat_rate')
+    def get_receipt_details(self, obj):
+        if obj.analyzed_data and isinstance(obj.analyzed_data, dict):
+            return {
+                'seller_name': obj.analyzed_data.get('seller_name'),
+                'date': obj.analyzed_data.get('date'),
+                'total_amount': obj.analyzed_data.get('total_amount'),
+                'vat_amount': obj.analyzed_data.get('vat_amount'),
+                'items': obj.analyzed_data.get('items', [])
+            }
+        return None
 
-        # Sadece fatura ve fiş için amount ve vat_rate zorunlu olsun
-        if document_type in ['invoice', 'receipt']:
-            if not amount:
-                raise serializers.ValidationError({"amount": "Fatura/Fiş için tutar alanı zorunludur."})
-            if vat_rate is None:
-                raise serializers.ValidationError({"vat_rate": "Fatura/Fiş için KDV oranı zorunludur."})
+    def get_file_url(self, obj):
+        if obj.file:
+            return obj.file.url
+        return None
+
+    def get_file_name(self, obj):
+        if obj.file:
+            return obj.file.name.split('/')[-1]
+        return None
+
+    def create(self, validated_data):
+        instance = super().create(validated_data)
         
-        return data
+        # Eğer belge tipi fiş ise OpenAI analizi yapmayı dene
+        if instance.document_type == 'receipt' and instance.file:
+            self.analyze_receipt(instance)
+        
+        return instance
+
+    def analyze_receipt(self, instance):
+        try:
+            import openai
+            import base64
+            import json
+            
+            # API key'i direkt olarak ayarla
+            openai.api_key = settings.OPENAI_API_KEY
+            
+            # Dosyayı oku ve base64'e çevir
+            with instance.file.open('rb') as image_file:
+                image_data = image_file.read()
+                base64_image = base64.b64encode(image_data).decode('utf-8')
+                base64_url = f"data:image/jpeg;base64,{base64_image}"
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-4-turbo",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Could you extract the following seller pricing information from this image and return ONLY the JSON data without any explanation? Include: seller_name, date, total_amount, vat_amount, items (array of items with name, quantity, unit_price)"
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": base64_url
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1000
+            )
+            
+            # OpenAI yanıtından JSON string'i çıkar ve parse et
+            response_text = response.choices[0].message['content']
+            json_str = response_text.strip()
+            if json_str.startswith('```json'):
+                json_str = json_str[7:]
+            if json_str.endswith('```'):
+                json_str = json_str[:-3]
+            
+            # JSON'ı parse et
+            analyzed_data = json.loads(json_str.strip())
+            
+            # Analiz sonucunu kaydet
+            instance.analyzed_data = analyzed_data
+            
+            # Analiz edilen değerleri ilgili alanlara kaydet
+            if 'total_amount' in analyzed_data:
+                instance.amount = analyzed_data['total_amount']
+            
+            if 'vat_amount' in analyzed_data and analyzed_data['total_amount']:
+                # KDV oranını hesapla: (KDV tutarı / Toplam tutar) * 100
+                try:
+                    vat_rate = (analyzed_data['vat_amount'] / analyzed_data['total_amount']) * 100
+                    instance.vat_rate = round(vat_rate, 2)  # 2 decimal places
+                except (ZeroDivisionError, TypeError):
+                    pass
+
+            instance.save()
+            
+        except Exception as e:
+            import traceback
+            print(f"Fiş analizi sırasında hata oluştu: {str(e)}")
+            print(traceback.format_exc())
+
+    def update(self, instance, validated_data):
+        # Sadece amount ve vat_rate alanlarının güncellenmesine izin ver
+        instance.amount = validated_data.get('amount', instance.amount)
+        instance.vat_rate = validated_data.get('vat_rate', instance.vat_rate)
+        instance.save()
+        return instance
 
 class DocumentUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = ['document_type', 'file', 'date', 'amount', 'vat_rate']
-
-    def validate(self, data):
-        document_type = data.get('document_type')
-        amount = data.get('amount')
-        vat_rate = data.get('vat_rate')
-
-        # Sadece fatura ve fiş için amount ve vat_rate zorunlu olsun
-        if document_type in ['invoice', 'receipt']:
-            if not amount:
-                raise serializers.ValidationError({"amount": "Fatura/Fiş için tutar alanı zorunludur."})
-            if vat_rate is None:  # 0 olabilir o yüzden None kontrolü
-                raise serializers.ValidationError({"vat_rate": "Fatura/Fiş için KDV oranı zorunludur."})
-        
-        return data
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = 'email'
